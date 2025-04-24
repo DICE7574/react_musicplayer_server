@@ -1,0 +1,7 @@
+.idea/
+*.iml
+workspace.xml
+vcs.xml
+node_modules
+package-lock.json
+.env
