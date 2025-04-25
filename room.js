@@ -135,6 +135,16 @@ module.exports = (app, io) => {
             }
         });
 
+        socket.on('remove-from-playlist', (songId) => {
+            for (const [roomCode, room] of Object.entries(rooms)) {
+                const member = room.members.find(m => m.id === socket.id);
+                if (member) {
+                    room.playlist = room.playlist.filter(song => song.id !== songId);
+                    io.to(roomCode).emit('update-playlist', room.playlist);
+                    break;
+                }
+            }
+        });
 
     });
 };
