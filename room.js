@@ -25,7 +25,8 @@ function cleanupEmptyRooms() {
 module.exports = (app, io) => {
 
     app.get('/', (req, res) => {
-        res.json(rooms);
+        res.setHeader('Content-Type', 'application/json');
+        res.send(JSON.stringify(rooms, null, 2)); // 들여쓰기 2칸
     });
 
     app.post('/room/create', (req, res) => {
@@ -133,5 +134,7 @@ module.exports = (app, io) => {
                 }
             }
         });
+
+
     });
 };

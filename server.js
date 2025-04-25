@@ -12,14 +12,18 @@ app.use(cors());
 app.use(express.json());
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
-
+const io = new Server(server, {
+    cors: {
+        origin: '*',
+        methods: ['GET', 'POST']
+    }
+});
 const PORT = process.env.PORT || 3001;
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
 roomHandlers(app, io);
 youtubeHandlers(app, io, YOUTUBE_API_KEY);
 
-server.listen(PORT, () => {
-    console.log(`✅ 서버 실행 중: http://localhost:${PORT}`);
+server.listen(3001, '0.0.0.0', () => {
+    console.log('✅ 서버 실행 중');
 });
