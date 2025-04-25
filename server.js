@@ -24,6 +24,6 @@ const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 roomHandlers(app, io);
 youtubeHandlers(app, io, YOUTUBE_API_KEY);
 
-server.listen(3001, '0.0.0.0', () => {
+server.listen(PORT, '0.0.0.0', () => {
     console.log('✅ 서버 실행 중');
 });
