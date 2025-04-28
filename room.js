@@ -1,6 +1,6 @@
 // 데이터 저장소
 let rooms = {};
-let nextSongId = 1;
+let nextSongId = 0;
 
 // 유틸: 초대 코드 생성
 function generateInviteCode() {
@@ -26,7 +26,7 @@ module.exports = (app, io) => {
 
     app.get('/', (req, res) => {
         res.setHeader('Content-Type', 'application/json');
-        res.send(JSON.stringify(rooms, null, 2)); // 들여쓰기 2칸
+        res.send(JSON.stringify(rooms, null, 2));
     });
 
     app.post('/room/create', (req, res) => {
@@ -34,6 +34,10 @@ module.exports = (app, io) => {
         const roomCode = generateInviteCode();
         rooms[roomCode] = {
             roomName: roomTitle,
+            isPlaying: true,
+            repeatMode: 'none',
+            currentTime: 0,
+            currentIndex: 0,
             members: [],
             playlist: []
         };
@@ -97,14 +101,23 @@ module.exports = (app, io) => {
         });
 
         socket.on('connect-room', ({ roomCode, userName }, callback) => {
-            if (rooms[roomCode]) {
-                const alreadyConnected = rooms[roomCode].members.some(m => m.id === socket.id);
+            const room = rooms[roomCode];
+            if (room) {
+                const alreadyConnected = room.members.some(m => m.id === socket.id);
                 if (!alreadyConnected) {
-                    rooms[roomCode].members.push({ id: socket.id, name: userName });
+                    room.members.push({ id: socket.id, name: userName });
                     socket.join(roomCode);
-                    io.to(roomCode).emit('update-members', rooms[roomCode].members.map(m => m.name));
+                    io.to(roomCode).emit('update-members', room.members.map(m => m.name));
                 }
-                callback({ success: true });
+                callback({
+                    success: true,
+                    state: {
+                        isPlaying: room.isPlaying,
+                        repeatMode: room.repeatMode,
+                        currentTime: room.currentTime,
+                        currentIndex: room.currentIndex
+                    }
+                });
             } else {
                 callback({ success: false, message: '방이 존재하지 않습니다.' });
             }
@@ -125,7 +138,7 @@ module.exports = (app, io) => {
                 if (member) {
                     const newSong = {
                         ...song,
-                        id: nextSongId++,
+                        id: ++nextSongId,
                         addedBy: member.name
                     };
                     room.playlist.push(newSong);
@@ -146,5 +159,52 @@ module.exports = (app, io) => {
             }
         });
 
+        socket.on('toggle-play-pause', ({ roomCode }) => {
+            const room = rooms[roomCode];
+            if (!room) return;
+            room.isPlaying = !room.isPlaying;
+            io.to(roomCode).emit('play-pause-toggled', { isPlaying: room.isPlaying });
+        });
+
+        socket.on('update-current-time', ({ roomCode, time }) => {
+            const room = rooms[roomCode];
+            if (!room) return;
+            room.currentTime = time;
+        });
+
+        socket.on('seek-to', ({ roomCode, time }) => {
+            const room = rooms[roomCode];
+            if (!room) return;
+            io.to(roomCode).emit('seeked-to', { time });
+        });
+
+        socket.on('change-repeat-mode', ({ roomCode, mode }) => {
+            const room = rooms[roomCode];
+            if (!room) return;
+
+            room.repeatMode = mode;
+            io.to(roomCode).emit('repeat-mode-changed', { mode });
+        });
+
+        socket.on('play-video-at', ({ roomCode, index, time }) => {
+            const room = rooms[roomCode];
+            if (!room) return;
+
+            room.currentIndex = index;
+            room.currentTime = time;
+
+            io.to(roomCode).emit('play-video-at', { index, time });
+        });
+
+        socket.on('request-sync', ({ roomCode }) => {
+            const room = rooms[roomCode];
+            if (!room) return;
+            socket.emit('sync-info', {
+                isPlaying: room.isPlaying,
+                currentTime: room.currentTime,
+                currentIndex: room.currentIndex,
+                repeatMode: room.repeatMode,
+            });
+        });
     });
 };
