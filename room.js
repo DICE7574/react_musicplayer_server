@@ -1,8 +1,17 @@
+const fs = require('fs');
 // 데이터 저장소
 let rooms = {};
 let nextSongId = 0;
 
-// 유틸: 초대 코드 생성
+try {
+    const data = fs.readFileSync('./testRoom.json', 'utf-8');
+    rooms = JSON.parse(data);
+    console.log('테스트 룸 불러오기 진행 성공');
+} catch (err) {
+    console.error('테스트 룸 불러오기 진행 실패', err);
+    rooms = {};
+}
+// 초대 코드 생성
 function generateInviteCode() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     let code = '';
@@ -14,7 +23,7 @@ function generateInviteCode() {
 
 function cleanupEmptyRooms() {
     for (const [code, room] of Object.entries(rooms)) {
-        if (room.members.length === 0) {
+        if (room.members.length === 0 && code !== 'test') {
             delete rooms[code];
             console.log(`🧹 빈 방 제거됨: ${code}`);
         }
@@ -67,8 +76,11 @@ module.exports = (app, io) => {
         const { roomCode } = req.params;
         const room = rooms[roomCode];
         if (room) {
-            const memberNames = room.members.map(member => member.name);
-            res.json({ success: true, members: memberNames });
+            const memberInfos = room.members.map(member => ({
+                id: member.id,
+                name: member.name
+            }));
+            res.json({ success: true, members: memberInfos });
         } else {
             res.status(404).json({ success: false, message: '방을 찾을 수 없습니다.' });
         }
@@ -94,7 +106,7 @@ module.exports = (app, io) => {
                 const before = room.members.length;
                 room.members = room.members.filter(member => member.id !== socket.id);
                 if (room.members.length !== before) {
-                    io.to(roomCode).emit('update-members', room.members.map(m => m.name));
+                    io.to(roomCode).emit('update-members', room.members.map(m => ({ id: m.id, name: m.name })));
                 }
             }
             cleanupEmptyRooms();
@@ -107,7 +119,7 @@ module.exports = (app, io) => {
                 if (!alreadyConnected) {
                     room.members.push({ id: socket.id, name: userName });
                     socket.join(roomCode);
-                    io.to(roomCode).emit('update-members', room.members.map(m => m.name));
+                    io.to(roomCode).emit('update-members', room.members.map(m => ({ id: m.id, name: m.name })));
                 }
                 callback({
                     success: true,
@@ -127,7 +139,7 @@ module.exports = (app, io) => {
             const room = rooms[roomCode];
             if (room) {
                 room.members = room.members.filter(member => member.id !== socket.id);
-                io.to(roomCode).emit('update-members', room.members.map(m => m.name));
+                io.to(roomCode).emit('update-members', room.members.map(m => ({ id: m.id, name: m.name })));
             }
             cleanupEmptyRooms();
         });
@@ -152,13 +164,25 @@ module.exports = (app, io) => {
             for (const [roomCode, room] of Object.entries(rooms)) {
                 const member = room.members.find(m => m.id === socket.id);
                 if (member) {
-                    room.playlist = room.playlist.filter(song => song.id !== songId);
-                    io.to(roomCode).emit('update-playlist', room.playlist);
+                    const removingIndex = room.playlist.findIndex(song => song.id === songId);
+                    if (removingIndex !== -1) {
+                        room.playlist = room.playlist.filter(song => song.id !== songId);
+
+                        if (room.currentIndex === removingIndex) {
+                            if (room.currentIndex >= room.playlist.length) {
+                                room.currentIndex = Math.max(0, room.playlist.length - 1);
+                            }
+                        } else if (room.currentIndex > removingIndex) {
+                            room.currentIndex -= 1;
+                        }
+
+                        io.to(roomCode).emit('update-playlist', room.playlist);
+                        io.to(roomCode).emit('play-video-at', { index: room.currentIndex, time: 0 }); // currentIndex 수정사항 broadcast
+                    }
                     break;
                 }
             }
         });
-
         socket.on('toggle-play-pause', ({ roomCode }) => {
             const room = rooms[roomCode];
             if (!room) return;
@@ -170,6 +194,14 @@ module.exports = (app, io) => {
             const room = rooms[roomCode];
             if (!room) return;
             room.currentTime = time;
+        });
+
+        socket.on('update-current-index', ({ roomCode, index }) => {
+            const room = rooms[roomCode];
+            if (!room) return;
+            room.currentIndex = index;
+
+            socket.to(roomCode).emit('update-current-index', { roomCode, index });
         });
 
         socket.on('seek-to', ({ roomCode, time }) => {

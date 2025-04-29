@@ -12,7 +12,7 @@ module.exports = (app, io, YOUTUBE_API_KEY) => {
                     q: query,
                     type: 'video',
                     key: YOUTUBE_API_KEY,
-                    maxResults: 8,
+                    maxResults: 6,
                 },
             });
 
