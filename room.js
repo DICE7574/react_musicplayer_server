@@ -18,6 +18,9 @@ function generateInviteCode() {
     for (let i = 0; i < 6; i++) {
         code += chars.charAt(Math.floor(Math.random() * chars.length));
     }
+    if (rooms[code]) {
+        console.log(`🟡중복 코드 당첨: ${code}`);
+    }
     return code;
 }
 
@@ -25,7 +28,7 @@ function cleanupEmptyRooms() {
     for (const [code, room] of Object.entries(rooms)) {
         if (room.members.length === 0 && code !== 'test') {
             delete rooms[code];
-            console.log(`🧹 빈 방 제거됨: ${code}`);
+            console.log(`🔴 빈 방 제거됨: ${code}`);
         }
     }
 }
@@ -40,10 +43,15 @@ module.exports = (app, io) => {
 
     app.post('/room/create', (req, res) => {
         const { roomTitle } = req.body;
-        const roomCode = generateInviteCode();
+        let roomCode;
+        do {
+            roomCode = generateInviteCode();
+        } while (rooms[roomCode]);
+        console.log(`🔵 방 생성: ${roomCode}`);
         rooms[roomCode] = {
             roomName: roomTitle,
             isPlaying: true,
+            isEnded: false,
             repeatMode: 'none',
             currentTime: 0,
             currentIndex: 0,
@@ -125,6 +133,7 @@ module.exports = (app, io) => {
                     success: true,
                     state: {
                         isPlaying: room.isPlaying,
+                        isEnded: room.isEnded,
                         repeatMode: room.repeatMode,
                         currentTime: room.currentTime,
                         currentIndex: room.currentIndex
@@ -155,6 +164,12 @@ module.exports = (app, io) => {
                     };
                     room.playlist.push(newSong);
                     io.to(roomCode).emit('update-playlist', room.playlist);
+                    if (room.isEnded) {
+                        const newIndex = room.playlist.length - 1;
+                        room.currentIndex = newIndex;
+                        room.currentTime = 0;
+                        io.to(roomCode).emit('play-video-at', { index: newIndex, time: 0, plist: room.playlist });
+                    }
                     break;
                 }
             }
@@ -165,29 +180,52 @@ module.exports = (app, io) => {
                 const member = room.members.find(m => m.id === socket.id);
                 if (member) {
                     const removingIndex = room.playlist.findIndex(song => song.id === songId);
+
                     if (removingIndex !== -1) {
                         room.playlist = room.playlist.filter(song => song.id !== songId);
-
-                        if (room.currentIndex === removingIndex) {
-                            if (room.currentIndex >= room.playlist.length) {
-                                room.currentIndex = Math.max(0, room.playlist.length - 1);
+                        io.to(roomCode).emit('update-playlist', room.playlist);
+                        if (room.currentIndex === removingIndex) { // 현재 재생중인 곡을 삭제한 경우
+                            if (room.playlist.length === 0) { // 플레이리스트가 비었을 때
+                                room.currentIndex = 0;
+                                room.currentTime = 0;
+                                room.isEnded = true;
+                                io.to(roomCode).emit('update-current-index', room.currentIndex);
+                                io.to(roomCode).emit('update-is-ended', { isEnded: room.isEnded });
                             }
-                        } else if (room.currentIndex > removingIndex) {
+                            else if (removingIndex >= room.playlist.length) { // 마지막 곡 삭제했으면, 이전 곡으로 이동
+                                room.currentIndex = room.playlist.length - 1;
+                                io.to(roomCode).emit('update-current-index', room.currentIndex);
+
+                                io.to(roomCode).emit('play-video-at', { index: room.currentIndex, time: 0, plist: room.playlist  });
+                            }
+                            else {
+                                io.to(roomCode).emit('play-video-at', { index: room.currentIndex, time: 0, plist: room.playlist });
+                            }
+                        }
+                        else if (room.currentIndex > removingIndex) {
+                            // 지금 보는 것보다 앞에 있는 곡을 삭제했다면 인덱스를 하나 줄인다
                             room.currentIndex -= 1;
+                            io.to(roomCode).emit('update-current-index', { index: room.currentIndex });
                         }
 
-                        io.to(roomCode).emit('update-playlist', room.playlist);
-                        io.to(roomCode).emit('play-video-at', { index: room.currentIndex, time: 0 }); // currentIndex 수정사항 broadcast
                     }
                     break;
                 }
             }
         });
+
         socket.on('toggle-play-pause', ({ roomCode }) => {
             const room = rooms[roomCode];
             if (!room) return;
             room.isPlaying = !room.isPlaying;
             io.to(roomCode).emit('play-pause-toggled', { isPlaying: room.isPlaying });
+        });
+
+        socket.on('update-is-ended', ({ roomCode, isEnded }) => {
+            const room = rooms[roomCode];
+            if (!room) return;
+            room.isEnded = isEnded;
+            socket.to(roomCode).emit('update-is-ended', { isEnded: room.isEnded });
         });
 
         socket.on('update-current-time', ({ roomCode, time }) => {
@@ -201,7 +239,7 @@ module.exports = (app, io) => {
             if (!room) return;
             room.currentIndex = index;
 
-            socket.to(roomCode).emit('update-current-index', { roomCode, index });
+            io.to(roomCode).emit('update-current-index', { index: room.currentIndex });
         });
 
         socket.on('seek-to', ({ roomCode, time }) => {
@@ -225,7 +263,7 @@ module.exports = (app, io) => {
             room.currentIndex = index;
             room.currentTime = time;
 
-            io.to(roomCode).emit('play-video-at', { index, time });
+            io.to(roomCode).emit('play-video-at', { index, time, plist : room.playlist });
         });
 
         socket.on('request-sync', ({ roomCode }) => {
@@ -233,6 +271,7 @@ module.exports = (app, io) => {
             if (!room) return;
             socket.emit('sync-info', {
                 isPlaying: room.isPlaying,
+                isEnded: room.isEnded,
                 currentTime: room.currentTime,
                 currentIndex: room.currentIndex,
                 repeatMode: room.repeatMode,
