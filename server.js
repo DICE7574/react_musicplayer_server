@@ -3,7 +3,6 @@ const express = require('express');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
-const fs = require('fs');
 
 const roomHandlers = require('./room');
 const youtubeHandlers = require('./youtube');
